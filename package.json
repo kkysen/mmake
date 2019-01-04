@@ -1,0 +1,29 @@
+{
+  "name": "mmake",
+  "version": "1.0.0",
+  "description": "mmake",
+  "author": "Khyber Sen",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kkysen/mmake.git"
+  },
+  "homepage": "https://github.com/kkysen/mmake#readme",
+  "bugs": {
+    "url": "https://github.com/kkysen/mmake/issues"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^5.0.4",
+    "@types/node": "^10.12.18",
+    "ts-loader": "^5.3.2",
+    "typescript": "^3.2.2"
+  },
+  "dependencies": {
+    "fs-extra": "^7.0.1",
+    "ts-node": "^7.0.1"
+  },
+  "main": "src/ts/core/main.js",
+  "scripts": {
+    "main": "node src/ts/core/main.js"
+  }
+}
