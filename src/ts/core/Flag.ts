@@ -7,4 +7,4 @@ export type Flags = ReadonlyArray<Flag>;
 export const {
     element: Flag,
     array: Flags,
-} = makeToString<Flag>(flag => `-${flag}`);
+} = makeToString<Flag>(flag => flag && `-${flag}`);

@@ -55,7 +55,7 @@ interface TargetClass {
     
     toMakeFile(target: Target, mode: ProductionMode): string;
     
-    makeFileGenerator(target: Target): () => Promise<void>;
+    makeFileGenerator(target: Target, log?: (generated: Path) => void): () => Promise<void>;
     
 }
 
@@ -213,7 +213,7 @@ export const Target: TargetClass = {
                 declarations: [
                     `${sources} := $(shell ${tools.find} ${src} ${matchSources})`,
                     sourcesToObjects(sources, objects),
-                    `${testSources} := $(filter ${test.resolve("%")} $(${sources}))`,
+                    `${testSources} := $(filter ${test.resolve("%")},$(${sources}))`,
                     sourcesToObjects(testSources, testObjects),
                     `${libObjects} := $(filter-out $(${testObjects}),$(${objects}))`,
                     `${dependencies} := $(${objects}:.o=.d)`,
@@ -235,16 +235,17 @@ export const Target: TargetClass = {
                     optimizations: Optimizations.toString(optimizations[mode]),
                 };
             })();
+            const join = (a: string[]): string => a.filter(Boolean).join(" ");
             const {warnings, suppressErrors, macros, include, debug, lto, optimizations} = flags;
-            const common = [debug, warnings, suppressErrors, optimizations, macros, include].join(" ");
+            const common = join([debug, warnings, suppressErrors, optimizations, macros, include]);
             const {c, cpp} = standards;
             const std = (version: string) => `-std=${version} ${common}`;
             return {
                 ...flags,
-                preprocessor: [include, macros, Flags.toString(["MMD", "MP"])].join(" "),
+                preprocessor: join([include, macros, Flags.toString(["MMD", "MP"])]),
                 c: std(`c${c}`),
                 cpp: std(`c++${cpp}`),
-                link: [debug, lto].join(" "),
+                link: join([debug, lto]),
             };
         })();
         
@@ -320,7 +321,7 @@ export const Target: TargetClass = {
                 target: "clean",
                 dependencies: "",
                 commands: [
-                    `${tools.rm} -r ${directories.bin}`,
+                    `${tools.rm} -r ${out.dir}`,
                 ],
                 phony: true,
             },
@@ -339,7 +340,7 @@ export const Target: TargetClass = {
         ].join("\n\n");
     },
     
-    makeFileGenerator(target: Target): () => Promise<void> {
+    makeFileGenerator(target: Target, log: (generated: Path) => void = () => {}): () => Promise<void> {
         const {development, production} = target.directories;
         return () => Object.entries({development, production})
             .map(([mode, dir]) => ({mode, dir}))
@@ -353,6 +354,7 @@ export const Target: TargetClass = {
                 const fd = await file.call(path.open(O_WRONLY | O_CREAT));
                 await fd.writeFile(contents);
                 await fd.close();
+                log(file);
             });
     },
     

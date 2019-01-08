@@ -24,7 +24,8 @@ declare interface ObjectConstructor {
     
     allEntries<T>(t: T): [keyof T, ValueOf<T>][];
     
-    defineSharedProperties(object: any, sharedDescriptor: PropertyDescriptor, propertyValues: Object, overwrite?: boolean): void;
+    defineSharedProperties(object: any, sharedDescriptor: PropertyDescriptor, propertyValues: Object,
+                           overwrite?: boolean): void;
     
     defineImmutableProperties(object: any, propertyValues: Object, overwrite?: boolean): void;
     

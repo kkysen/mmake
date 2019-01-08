@@ -1,4 +1,5 @@
 import * as child_process from "child_process";
+import * as readline from "readline";
 import {path} from "../util/io/pathExtensions";
 import {Config} from "./Config";
 import {MMakeArgs} from "./MMakeArgs";
@@ -13,12 +14,15 @@ export interface MMakeTarget {
     
 }
 
+const tab = "    ";
+
 const MMakeTarget = {
     
     of(targets: Targets): MMakeTarget {
         async function make(): Promise<void> {
-            await targets.map(Target.makeFileGenerator)
-                .asyncMap(f => f());
+            await targets.map(target =>
+                Target.makeFileGenerator(target, generated => console.log(`${tab}${generated}`))
+            ).asyncMap(f => f());
         }
         
         async function run(modeSet: Set<ProductionMode>, args: ReadonlyArray<string>): Promise<void> {
@@ -40,21 +44,31 @@ const MMakeTarget = {
                         `--jobs=${parallelism}`,
                         ...args,
                     ];
-                    console.log(`running make ${makeArgs.join(" ")}`);
-                    if ("b".includes("a")) {
-                        return {temp, child: {on() {}}};
-                    }
+                    console.log(`${tab}\`make ${makeArgs.join(" ")}\``);
                     await dir.resolve("Makefile").call(path.copy.to(temp));
                     return {
                         temp,
                         child: child_process.spawn("make", makeArgs, {
-                            stdio: "inherit",
+                            stdio: ["inherit", "pipe", "inherit"],
                             windowsHide: true,
                         }),
                     };
                 })
                 .map(spawn => async () => {
                     const {temp, child} = await spawn();
+                    const out = {
+                        stdout: console.log,
+                        stderr: console.error,
+                    };
+                    // can pipe stderr, too, but then I lose terminal coloring for some reason
+                    const streamNames: (keyof typeof out)[] = ["stdout"];
+                    streamNames.forEach(streamName => {
+                        const lines = readline.createInterface({
+                            input: child[streamName],
+                            terminal: true,
+                        });
+                        lines.on("line", line => out[streamName](`${tab}${tab}${line}`));
+                    });
                     await new Promise<void>((resolve, reject) => {
                         child.on("exit", resolve);
                         child.on("error", reject);
@@ -101,7 +115,7 @@ export const MMake = {
         
         async function run(args: ReadonlyArray<string>): Promise<void> {
             const [targetArg = "", ...makeArgs] = args;
-            const [_, mmake, targetName, run, modeArg] = /(-?)([^:]*)(:?)(.*)/.exec(targetArg)!!;
+            const [_, targetName, run, modeArg] = /([^:]*)(:?)(.*)/.exec(targetArg)!!;
             const target = targetName ? getTarget(targetName) : getAllTargets();
             if (run) {
                 const all = ProductionModes.all;
@@ -110,7 +124,7 @@ export const MMake = {
                     throw new Error(`"${modeArg}" does not match any production modes: ${all}`);
                 }
                 await target.run(new Set(modes), makeArgs);
-            } else if (mmake || !targetName) {
+            } else {
                 await target.make();
             }
         }
