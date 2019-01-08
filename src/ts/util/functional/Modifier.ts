@@ -1,1 +1,0 @@
-export type Modifier<T> = (t: T) => T;

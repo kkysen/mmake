@@ -1,11 +1,9 @@
 import {cmp} from "../misc/compare";
-import {equals as equalsLib} from "../misc/equals";
 import {mapFields} from "../object/mapFields";
 import {truthy} from "../types/Truthy";
 import {ValueOf} from "../types/ValueOf";
 import {isBrowser} from "../window/anyWindow";
 import {writableExtensions} from "./extensionsConfig";
-import Equals = equalsLib.Equals;
 
 const immutableDescriptor: PropertyDescriptor = Object.freeze({
     writable: writableExtensions,
@@ -224,8 +222,8 @@ Object.defineImmutableProperties(Array.prototype, {
         return this.splice(index, 1)[0];
     },
     
-    remove<T>(this: T[], value: T, equals?: Equals<T>): T | undefined {
-        const i: number = !equals ? this.indexOf(value) : this.findIndex(equalsLib.bind(equals, value));
+    remove<T>(this: T[], value: T, equals?: (t1: T, t2: T) => boolean): T | undefined {
+        const i: number = !equals ? this.indexOf(value) : this.findIndex(e => equals(value, e));
         if (i !== -1) {
             return this.removeAt(i);
         }
