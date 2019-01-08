@@ -15,7 +15,7 @@ export const MMakeArgs = {
         const defaultConfigPath = "./mmake.config.ts";
         // const defaultConfigPath = "./MMake.js";
         const [configPathFlag = "", configPath, ...mmakeArgs] = args;
-        if (new Set(["-p", "--path"]).has(configPathFlag)) {
+        if (new Set(["-p", "--pathLib"]).has(configPathFlag)) {
             if (!configPath) {
                 throw new Error(`path flag supplied but ${defaultConfigPath} path not specified`);
             }

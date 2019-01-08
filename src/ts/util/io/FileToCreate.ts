@@ -1,6 +1,9 @@
+import {O_WRONLY} from "constants";
 import * as fs from "fs-extra";
 import {MaybePromise} from "../maybePromise/MaybePromise";
 import {isFunction, isString} from "../types/isType";
+import {Path} from "./Path";
+import {path} from "./pathExtensions";
 
 export interface Creator {
     readonly create: () => Promise<void>;
@@ -8,7 +11,7 @@ export interface Creator {
 
 export interface FileToCreate extends Creator {
     
-    readonly path: string;
+    readonly path: Path;
     
 }
 
@@ -24,10 +27,14 @@ export const FileContents = {
 
 export const FileToCreate = {
     
-    of(path: string, contents: FileContents): FileToCreate {
+    of(_path: Path, contents: FileContents): FileToCreate {
         return {
-            path,
-            create: async () => await fs.writeFile(path, await FileContents.create(contents)),
+            path: _path,
+            create: async () => {
+                const fd = await _path.call(path.open(O_WRONLY));
+                await fd.writeFile(await FileContents.create(contents));
+                await fd.close();
+            },
         };
     }
     

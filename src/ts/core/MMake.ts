@@ -1,12 +1,15 @@
+import * as child_process from "child_process";
+import {path} from "../util/io/pathExtensions";
 import {Config} from "./Config";
 import {MMakeArgs} from "./MMakeArgs";
+import {ProductionMode, ProductionModes} from "./ProductionModes";
 import {Target, Targets} from "./Target";
 
 export interface MMakeTarget {
     
     make(): Promise<void>;
     
-    run(args: ReadonlyArray<string>): Promise<void>;
+    run(modes: Set<ProductionMode>, args: ReadonlyArray<string>): Promise<void>;
     
 }
 
@@ -18,9 +21,50 @@ const MMakeTarget = {
                 .asyncMap(f => f());
         }
         
-        async function run(args: ReadonlyArray<string>): Promise<void> {
+        async function run(modeSet: Set<ProductionMode>, args: ReadonlyArray<string>): Promise<void> {
             await make();
-            
+            const parallelism = 4; // TODO
+            const modes = [...modeSet];
+            const spawners = targets
+                .map(e => e.directories)
+                .flatMap(directories => modes.map(mode => directories[mode]))
+                .map(dir => async () => {
+                    // The paths in the Makefiles are all relative to the cwd,
+                    // so they can't be run from those directories.
+                    // Instead, I'm copying them over to a local temp file
+                    // and then running make on that Makefile.
+                    const temp = await path.of("Makefile.").call(path.temp());
+                    const makeArgs = [
+                        `--makefile=${temp}`,
+                        `--include-dir=${dir}`,
+                        `--jobs=${parallelism}`,
+                        ...args,
+                    ];
+                    console.log(`running make ${makeArgs.join(" ")}`);
+                    if ("b".includes("a")) {
+                        return {temp, child: {on() {}}};
+                    }
+                    await dir.resolve("Makefile").call(path.copy.to(temp));
+                    return {
+                        temp,
+                        child: child_process.spawn("make", makeArgs, {
+                            stdio: "inherit",
+                            windowsHide: true,
+                        }),
+                    };
+                })
+                .map(spawn => async () => {
+                    const {temp, child} = await spawn();
+                    await new Promise<void>((resolve, reject) => {
+                        child.on("exit", resolve);
+                        child.on("error", reject);
+                    });
+                    await temp.call(path.remove.file);
+                });
+            // run sequentially, parallelism is passed to make itself
+            for (const spawn of spawners) {
+                await spawn();
+            }
         }
         
         return {make, run};
@@ -56,11 +100,16 @@ export const MMake = {
         }
         
         async function run(args: ReadonlyArray<string>): Promise<void> {
-            const [targetArg, ...makeArgs] = args;
-            const [mmake, targetName, run] = /(-?)([^:]*)(:?)/.exec(targetArg)!!;
+            const [targetArg = "", ...makeArgs] = args;
+            const [_, mmake, targetName, run, modeArg] = /(-?)([^:]*)(:?)(.*)/.exec(targetArg)!!;
             const target = targetName ? getTarget(targetName) : getAllTargets();
             if (run) {
-                await target.run(makeArgs);
+                const all = ProductionModes.all;
+                const modes = !modeArg ? all : all.filter(mode => mode.startsWith(modeArg));
+                if (modes.length === 0) {
+                    throw new Error(`"${modeArg}" does not match any production modes: ${all}`);
+                }
+                await target.run(new Set(modes), makeArgs);
             } else if (mmake || !targetName) {
                 await target.make();
             }

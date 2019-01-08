@@ -1,10 +1,13 @@
 import {UserConfig} from "./src/ts/core/Config";
 
 export const mmake: UserConfig = {
-    name: "test",
+    name: "mmake",
     targets: [
         {
             target: "native",
+        },
+        {
+            target: "wasm",
         },
     ],
 };

@@ -1,11 +1,11 @@
-import * as path from "path";
-import {Dir} from "../util/io/Dir";
+import {Path} from "../util/io/Path";
+import {path} from "../util/io/pathExtensions";
 import {Flag, Flags} from "./Flag";
 import {makeToString} from "./utils";
 
 export interface Library {
-    readonly include: Dir;
-    readonly binary?: string;
+    readonly include: Path;
+    readonly binary?: Path;
 }
 
 export type Libraries = ReadonlyArray<Library>;
@@ -18,22 +18,26 @@ export const {
 export const {
     element: LibraryBinary,
     array: LibraryBinaries,
-} = makeToString<Library>(library => {
-    if (!library.binary) {
+} = makeToString<Library>(({binary}) => {
+    if (!binary) {
         return;
     }
-    const {dir, name} = path.parse(library.binary);
-    if (!dir) {
+    const {directory, fileName} = binary;
+    if (!fileName) {
+        throw new Error(`library.binary must have a Path.fileName`);
+    }
+    if (!directory) {
         // system library, interpret filename as library name
-        return Flag.toString(`l${name}`);
+        return Flag.toString(`l${fileName}`);
     } else {
-        // local library, interpret path as path to library binary
-        if (!name.startsWith("lib")) {
-            throw new Error(`${library.binary} must be a library file beginning with "lib"`);
+        const lib = "lib";
+        // local library, interpret pathLib as pathLib to library binary
+        if (!fileName.call(path.startsWith(lib))) {
+            throw new Error(`${binary} must be a library file beginning with "${lib}"`);
         }
         return Flags.toString([
-            `L${dir}`,
-            `l${name.slice("lib".length)}`,
+            `L${directory}`,
+            `l${fileName.raw.slice(lib.length)}`,
         ]);
     }
 });

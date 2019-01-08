@@ -1,4 +1,6 @@
-import {Dir} from "../util/io/Dir";
+import {O_CREAT, O_WRONLY} from "constants";
+import {Path} from "../util/io/Path";
+import {path} from "../util/io/pathExtensions";
 import {Compiler, compilers} from "./Compiler";
 import {Debug} from "./Debug";
 import {Directories} from "./Directories";
@@ -9,9 +11,9 @@ import {Macros} from "./Macros";
 import {MakeRule} from "./MakeRule";
 import {Optimizations} from "./Optimizations";
 import {ProductionMode, ProductionModes} from "./ProductionModes";
-import {SuppressError, SuppressErrors} from "./SuppressError";
+import {SuppressErrors} from "./SuppressError";
 import {Tools} from "./Tools";
-import {Warning, Warnings} from "./Warning";
+import {Warnings} from "./Warning";
 
 export interface Target {
     readonly name: string;
@@ -80,7 +82,7 @@ export const Target: TargetClass = {
         suppressErrors: [],
         macros: (() => {
             const macros = {
-                _POSIX_C_SOURCE: "201810L",
+                _POSIX_C_SOURCE: "201901L",
                 _XOPEN_SOURCE: "700",
                 _DEFAULT_SOURCE: "1",
             };
@@ -91,7 +93,7 @@ export const Target: TargetClass = {
         })(),
         libraries: [
             {
-                include: Dir.of("."),
+                include: path.of("."),
             }
         ],
         optimizations: {
@@ -122,7 +124,7 @@ export const Target: TargetClass = {
             test: "test",
             development: "development",
             production: "production",
-        }.mapFields(Dir.of),
+        }.mapFields(path.of),
     },
     
     merge(name: string, target: UserTarget, defaultTarget: Target = Target.default): Target {
@@ -181,21 +183,25 @@ export const Target: TargetClass = {
             const dir = directories[mode];
             return {
                 dir,
-                lib: dir.file(`lib${name}.a`),
-                test: dir.file(`${name}.test.out`),
-                exe: dir.file(`${name}.out`),
+                lib: dir.resolve(`lib${name}.a`),
+                test: dir.resolve(`${name}.test.out`),
+                exe: dir.resolve(`${name}.out`),
             };
         })();
         
         const vars = (() => {
             const sources = "SRCS";
             const objects = "OBJS";
+            const testSources = "TEST_SRCS";
             const testObjects = "TEST_OBJS";
             const libObjects = "LIB_OBJS";
             const dependencies = "DEPS";
-            const {src, bin, test} = directories;
+            const {src, [mode]: out, test} = directories;
             const matchSources = Object.keys(compilers)
                 .map(ext => `-name "*.${ext}"`).join(" -or ");
+            function sourcesToObjects(sources: string, objects: string) {
+                return `${objects} := $(${sources}:${src.resolve("%")}=${out.resolve("%.o")})`;
+            }
             return {
                 names: {
                     sources,
@@ -205,9 +211,10 @@ export const Target: TargetClass = {
                     dependencies,
                 },
                 declarations: [
-                    `${sources} := $(shell ${tools.find} ${src.path} ${matchSources})`,
-                    `${objects} := $(${sources}:${src.path}%=${bin.path}%.o)`,
-                    `${testObjects} := $(filter ${bin.dir(test.path).path}/%,$(${objects}))`,
+                    `${sources} := $(shell ${tools.find} ${src} ${matchSources})`,
+                    sourcesToObjects(sources, objects),
+                    `${testSources} := $(filter ${test.resolve("%")} $(${sources}))`,
+                    sourcesToObjects(testSources, testObjects),
                     `${libObjects} := $(filter-out $(${testObjects}),$(${objects}))`,
                     `${dependencies} := $(${objects}:.o=.d)`,
                 ],
@@ -242,8 +249,8 @@ export const Target: TargetClass = {
         })();
         
         const objectRule = (language: Language): MakeRule => ({
-            target: `${out.dir.file(`%.${language}.o`)}`,
-            dependencies: `${directories.src.file(`%.${language}`)}`,
+            target: `${out.dir.resolve(`%.${language}.o`)}`,
+            dependencies: `${directories.src.resolve(`%.${language}`)}`,
             commands: [
                 `${tools.mkdir} $(dir $@)`,
                 `${preprocessor[language]} ${flags.preprocessor} $< -MF $(@:.o=.d) -MT $@ > /dev/null`,
@@ -252,7 +259,7 @@ export const Target: TargetClass = {
             phony: false,
         });
         
-        const executeRule = (target: string, executable: string): MakeRule => ({
+        const executeRule = (target: string, executable: Path): MakeRule => ({
             target,
             dependencies: executable,
             commands: [
@@ -262,7 +269,7 @@ export const Target: TargetClass = {
         });
         
         const ownLibrary: Library = {
-            include: Dir.of("."),
+            include: path.of("."),
             binary: out.lib,
         };
         
@@ -305,7 +312,7 @@ export const Target: TargetClass = {
             executeRule("run", out.exe),
             {
                 target: "all",
-                dependencies: Object.values(out).join(" "),
+                dependencies: [out.lib, out.test, out.exe].join(" "),
                 commands: [],
                 phony: true,
             },
@@ -318,7 +325,12 @@ export const Target: TargetClass = {
                 phony: true,
             },
         ];
-        
+        const a = [
+            vars.declarations.join("\n"),
+            ...rules.map(MakeRule.toString),
+            `-include $(${vars.names.dependencies})`,
+            "",
+        ];
         return [
             vars.declarations.join("\n"),
             ...rules.map(MakeRule.toString),
@@ -329,11 +341,19 @@ export const Target: TargetClass = {
     
     makeFileGenerator(target: Target): () => Promise<void> {
         const {development, production} = target.directories;
-        const creators = Object.entries({development, production})
-            .map(([mode, dir]) =>
-                dir.fileToCreate("Makefile", () => Target.toMakeFile(target, mode)))
-            .map(file => file.create);
-        return () => creators.asyncForEach(f => f());
+        return () => Object.entries({development, production})
+            .map(([mode, dir]) => ({mode, dir}))
+            .map(({mode, dir}) => ({
+                dir,
+                file: dir.resolve("Makefile"),
+                contents: Target.toMakeFile(target, mode),
+            }))
+            .asyncForEach(async ({dir, file, contents}) => {
+                await dir.call(path.create.directory({recursive: true}));
+                const fd = await file.call(path.open(O_WRONLY | O_CREAT));
+                await fd.writeFile(contents);
+                await fd.close();
+            });
     },
     
 };

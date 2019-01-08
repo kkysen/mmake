@@ -1,6 +1,8 @@
+import {Path} from "../util/io/Path";
+
 export interface MakeRule {
-    readonly target: string;
-    readonly dependencies: string;
+    readonly target: Path | string;
+    readonly dependencies: Path | string;
     readonly commands: ReadonlyArray<string>;
     readonly phony: boolean;
 }
@@ -11,7 +13,8 @@ export const MakeRule = {
         const {target, dependencies} = rule;
         const commands = rule.commands.map(command => `\t${command}\n`);
         const phony = rule.phony ? `.PHONY: ${target}\n` : "";
-        return `${target}: ${dependencies}\n${commands}${phony}`;
+        const s = `${target.toString()}: ${dependencies.toString()}\n${commands.join("")}${phony}`;
+        return `${target.toString()}: ${dependencies.toString()}\n${commands.join("")}${phony}`;
     },
     
 };

@@ -1,8 +1,8 @@
-import {Dir} from "../util/io/Dir";
+import {Path} from "../util/io/Path";
 import {Flag} from "./Flag";
 import {makeToString} from "./utils";
 
-export type IncludeDir = Dir;
+export type IncludeDir = Path;
 
 export const {
     element: IncludeDir,
