@@ -108,6 +108,7 @@ abstract class BasePath implements Path {
     
     protected appendRaw(path: string) {
         const fs = this.fileSystem;
+        path = fs.coerce.path(path);
         // easier to re-parse, since stored as singly linked list makes it hard to iterate
         let result: Path = this;
         const {root, relative} = this.splitAtRoot(path);

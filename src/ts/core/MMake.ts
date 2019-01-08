@@ -20,8 +20,9 @@ const MMakeTarget = {
     
     of(targets: Targets): MMakeTarget {
         async function make(): Promise<void> {
+            console.log(`${tab}generating Makefiles...`);
             await targets.map(target =>
-                Target.makeFileGenerator(target, generated => console.log(`${tab}${generated}`))
+                Target.makeFileGenerator(target, generated => console.log(`${tab}${tab}${generated}`))
             ).asyncMap(f => f());
         }
         

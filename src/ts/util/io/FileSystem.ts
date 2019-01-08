@@ -11,6 +11,10 @@ export interface BaseFileSystem {
     readonly root: BaseValidator<string>;
     readonly character: BaseValidator<string>;
     
+    readonly coerce: {
+        character(character: string): string;
+    }
+    
 }
 
 export interface FileSystem {
@@ -22,6 +26,11 @@ export interface FileSystem {
     readonly root: Validator<string>;
     readonly character: Validator<string>;
     readonly segment: Validator<string>;
+    
+    readonly coerce: {
+        character(character: string): string;
+        path(path: string): string;
+    }
     
     switchTo(): PathExtension<Path>;
     
@@ -35,6 +44,7 @@ export namespace FileSystem {
             separator,
             root,
             character,
+            coerce,
         }: BaseFileSystem
     ): FileSystem {
         function errorMessage(type: string): (t: string) => string {
@@ -57,8 +67,15 @@ export namespace FileSystem {
             }),
             segment: Validator.make({
                 isValid: segment => [...segment].every(character.isValid),
-                errorMessage: errorMessage("segment"),
+                errorMessage: segment => {
+                    const invalidChar = [...segment].find(character.isValid.negate());
+                    return `${errorMessage("segment")(segment)} (${invalidChar})`;
+                },
             }),
+            coerce: {
+                ...coerce,
+                path: path => [...path].map(coerce.character).join("")
+            },
             switchTo() {
                 return path.switchToFileSystem(this);
             }

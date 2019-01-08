@@ -1,4 +1,5 @@
 import {addExtensions} from "../util/extensions/allExtensions";
+import {path} from "../util/io/pathExtensions";
 import {MMake} from "./MMake";
 import {MMakeArgs} from "./MMakeArgs";
 

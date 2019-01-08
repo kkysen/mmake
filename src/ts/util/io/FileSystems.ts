@@ -11,6 +11,9 @@ export namespace FileSystems {
         character: {
             isValid: c => !":/\"?*|<>\\".includes(c), // TODO
         },
+        coerce: {
+            character: c => c,
+        },
     });
     
     export const windows: FileSystem = FileSystem.make({
@@ -20,7 +23,10 @@ export namespace FileSystems {
             isValid: root => root.endsWith(":\\"),
         },
         character: {
-            isValid: c => !":/\"?*|<>\\".includes(c), // TODO
+            isValid: c => !":\"?*|<>\\".includes(c), // TODO
+        },
+        coerce: {
+            character: c => c.replace("/", "\\"),
         },
     });
     

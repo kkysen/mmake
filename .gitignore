@@ -1,2 +1,6 @@
 node_modules/
 .idea/
+isolate*.log
+
+mmake.config.*
+bin/
