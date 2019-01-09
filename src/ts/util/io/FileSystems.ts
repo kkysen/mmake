@@ -9,7 +9,7 @@ export namespace FileSystems {
             isValid: root => root === "/",
         },
         character: {
-            isValid: c => !":/\"?*|<>\\".includes(c), // TODO
+            isValid: c => !":/\"?*|<>\\".includes(c),
         },
         coerce: {
             character: c => c,
@@ -23,7 +23,7 @@ export namespace FileSystems {
             isValid: root => root.endsWith(":\\"),
         },
         character: {
-            isValid: c => !":\"?*|<>\\".includes(c), // TODO
+            isValid: c => !":\"?*|<>\\".includes(c),
         },
         coerce: {
             character: c => c.replace("/", "\\"),
