@@ -22,7 +22,7 @@ export const {
     if (!binary) {
         return;
     }
-    const {directory, fileName} = binary;
+    const {directory, extensionLessFileName: fileName} = binary;
     if (!fileName) {
         throw new Error(`library.binary must have a Path.fileName`);
     }
@@ -32,12 +32,12 @@ export const {
     } else {
         const lib = "lib";
         // local library, interpret pathLib as pathLib to library binary
-        if (!fileName.call(path.startsWith(lib))) {
+        if (!fileName.startsWith(lib)) {
             throw new Error(`${binary} must be a library file beginning with "${lib}"`);
         }
         return Flags.toString([
             `L${directory}`,
-            `l${fileName.raw.slice(lib.length)}`,
+            `l${fileName.slice(lib.length)}`,
         ]);
     }
 });

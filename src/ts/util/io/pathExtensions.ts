@@ -2,6 +2,7 @@ import {O_CREAT, O_EXCL} from "constants";
 import {MakeDirectoryOptions, promises, Stats} from "fs";
 import {CopyOptions, MoveOptions} from "fs-extra";
 import * as os from "os";
+import {production} from "../env/production";
 import {ErrnoCode} from "../error/errno";
 import {TODO} from "../error/todo";
 import {FileSystem} from "./FileSystem";
@@ -89,6 +90,13 @@ export namespace path {
     }
     
     export function open(flags: string | number, mode?: string | number): PathExtension<Promise<FileHandle>> {
+        if (production) {
+            return wrapRaw(async path => {
+                const fd = await fsp.open(path, flags, mode);
+                console.log({fd: fd.fd, path: path});
+                return fd;
+            });
+        }
         return wrapRaw(path => fsp.open(path, flags, mode));
     }
     

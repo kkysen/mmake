@@ -1,5 +1,5 @@
+import {setNodeEnv} from "../util/env/production";
 import {addExtensions} from "../util/extensions/allExtensions";
-import {path} from "../util/io/pathExtensions";
 import {MMake} from "./MMake";
 import {MMakeArgs} from "./MMakeArgs";
 
@@ -9,6 +9,7 @@ export async function run(args: ReadonlyArray<string>): Promise<void> {
 }
 
 export function main(): void {
+    setNodeEnv("production");
     addExtensions();
     (async () => {
         try {

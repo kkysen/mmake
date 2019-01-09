@@ -275,6 +275,12 @@ export const Target: TargetClass = {
         };
         
         const rules: MakeRule[] = [
+            {
+                target: "all",
+                dependencies: [out.lib, out.test, out.exe].join(" "),
+                commands: [],
+                phony: true,
+            },
             objectRule("c"),
             objectRule("cpp"),
             {
@@ -290,7 +296,7 @@ export const Target: TargetClass = {
                 target: out.test,
                 dependencies: `${out.lib} $(TEST_OBJS)`,
                 commands: [
-                    `${compilers.c} ${flags.link} $(OBJS) -o $@ ${flags.loadLibraries} ${LibraryBinary.toString(
+                    `${compilers.cpp} ${flags.link} $(OBJS) -o $@ ${flags.loadLibraries} ${LibraryBinary.toString(
                         ownLibrary)}`,
                 ],
                 phony: false,
@@ -299,7 +305,7 @@ export const Target: TargetClass = {
                 target: out.exe,
                 dependencies: `$(OBJS)`,
                 commands: [
-                    `${compilers.c} ${flags.link} $(OBJS) -o $@ ${flags.loadLibraries}`,
+                    `${compilers.cpp} ${flags.link} $(OBJS) -o $@ ${flags.loadLibraries}`,
                 ],
                 phony: false,
             },
@@ -311,12 +317,6 @@ export const Target: TargetClass = {
             },
             executeRule("test", out.test),
             executeRule("run", out.exe),
-            {
-                target: "all",
-                dependencies: [out.lib, out.test, out.exe].join(" "),
-                commands: [],
-                phony: true,
-            },
             {
                 target: "clean",
                 dependencies: "",

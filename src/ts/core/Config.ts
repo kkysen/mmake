@@ -55,6 +55,7 @@ export const Config = {
         const resolvedPath = resolveRequirePath(requirePath);
         const fd = await resolvedPath.call(path.open(O_RDONLY));
         const code = (await fd.readFile()).toString();
+        await fd.close();
         // TODO use TypeScript compiler API instead
         const mmakeExport = "export const mmake: UserConfig = ";
         if (!code.includes(mmakeExport)) {

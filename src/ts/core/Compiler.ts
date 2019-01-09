@@ -20,8 +20,10 @@ function makeCompiler(compilers: Languages, prefix: string): Compiler {
     };
 }
 
-export const compilers = {
-    gcc: makeCompiler({c: "gcc", cpp: "g++"}, "gcc"),
-    clang: makeCompiler({c: "clang", cpp: "clang++"}, "llvm"),
-    emscripten: makeCompiler({c: "emcc", cpp: "emcc"}, "llvm"),
-};
+export namespace compilers {
+    
+    export const gcc = makeCompiler({c: "gcc", cpp: "g++"}, "gcc");
+    export const clang = makeCompiler({c: "clang", cpp: "clang++"}, "llvm");
+    export const emscripten = makeCompiler({c: "emcc", cpp: "emcc"}, "llvm");
+    
+}

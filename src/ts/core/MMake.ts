@@ -28,7 +28,7 @@ const MMakeTarget = {
         
         async function run(modeSet: Set<ProductionMode>, args: ReadonlyArray<string>): Promise<void> {
             await make();
-            const parallelism = 4; // TODO
+            const parallelism = 1; // TODO
             const modes = [...modeSet];
             const spawners = targets
                 .map(e => e.directories)
@@ -122,7 +122,7 @@ export const MMake = {
                 const all = ProductionModes.all;
                 const modes = !modeArg ? all : all.filter(mode => mode.startsWith(modeArg));
                 if (modes.length === 0) {
-                    throw new Error(`"${modeArg}" does not match any production modes: ${all}`);
+                    throw new Error(`"${modeArg}" does not match any production modes: [${all.join(", ")}]`);
                 }
                 await target.run(new Set(modes), makeArgs);
             } else {
