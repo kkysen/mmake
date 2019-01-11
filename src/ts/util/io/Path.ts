@@ -302,6 +302,10 @@ class ChainedPath extends BasePath {
 
 export namespace Path {
     
+    export function is(path: any): path is Path {
+        return path instanceof BasePath;
+    }
+    
     export function of(path: string, fileSystem: FileSystem): Path {
         const empty = FilePath.empty(fileSystem);
         return path ? empty.resolve(path) : empty;

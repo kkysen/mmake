@@ -4,8 +4,8 @@ import {Flag, Flags} from "./Flag";
 import {makeToString} from "./utils";
 
 export interface Library {
-    readonly include: Path;
-    readonly binary?: Path;
+    readonly include?: Path | string;
+    readonly binary?: Path | string;
 }
 
 export type Libraries = ReadonlyArray<Library>;
@@ -13,16 +13,13 @@ export type Libraries = ReadonlyArray<Library>;
 export const {
     element: LibraryInclude,
     array: LibraryIncludes,
-} = makeToString<Library>(library => Flag.toString(`I${library.include}`));
+} = makeToString<Library>(({include}) => include && Flag.toString(`I${include}`));
 
 export const {
     element: LibraryBinary,
     array: LibraryBinaries,
-} = makeToString<Library>(({binary}) => {
-    if (!binary) {
-        return;
-    }
-    const {directory, extensionLessFileName: fileName} = binary;
+} = makeToString<Library>(({binary}) => binary && (() => {
+    const {directory, extensionLessFileName: fileName} = path.of(binary);
     if (!fileName) {
         throw new Error(`library.binary must have a Path.fileName`);
     }
@@ -40,4 +37,4 @@ export const {
             `l${fileName.slice(lib.length)}`,
         ]);
     }
-});
+})());

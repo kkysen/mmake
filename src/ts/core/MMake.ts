@@ -28,7 +28,6 @@ const MMakeTarget = {
         
         async function run(modeSet: Set<ProductionMode>, args: ReadonlyArray<string>): Promise<void> {
             await make();
-            const parallelism = 1; // TODO
             const modes = [...modeSet];
             const spawners = targets
                 .map(e => e.directories)
@@ -42,7 +41,6 @@ const MMakeTarget = {
                     const makeArgs = [
                         `--makefile=${temp}`,
                         `--include-dir=${dir}`,
-                        `--jobs=${parallelism}`,
                         ...args,
                     ];
                     console.log(`${tab}\`make ${makeArgs.join(" ")}\``);

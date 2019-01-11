@@ -93,8 +93,8 @@ export const Target: TargetClass = {
         })(),
         libraries: [
             {
-                include: path.of("."),
-            }
+                include: ".",
+            },
         ],
         optimizations: {
             development: {
@@ -270,7 +270,7 @@ export const Target: TargetClass = {
         });
         
         const ownLibrary: Library = {
-            include: path.of("."),
+            include: ".",
             binary: out.lib,
         };
         

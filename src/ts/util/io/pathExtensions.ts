@@ -22,12 +22,23 @@ export namespace path {
     import FileHandle = fsp.FileHandle;
     import ErrnoException = NodeJS.ErrnoException;
     
-    export function of(path: string, fileSystem: FileSystem = FileSystems.posix) {
+    // can't declare as const b/c conflicts with namespace is
+    export function is(path: any): path is Path {
+        return Path.is(path);
+    }
+    
+    export function of(path: string | Path, fileSystem: FileSystem = FileSystems.posix) {
+        if (is(path)) {
+            return path.call(switchToFileSystem(fileSystem));
+        }
         return Path.of(path, fileSystem);
     }
     
     export function switchToFileSystem(fileSystem: FileSystem): PathExtension<Path> {
         return path => {
+            if (path.fileSystem === fileSystem) {
+                return path;
+            }
             if (path.isAbsolute) {
                 throw new Error(`Can't switch FileSystem of absolute path: "${path.raw}"`);
             }
