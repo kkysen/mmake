@@ -38,7 +38,7 @@ function resolveRequirePath(requirePath: Path): Path {
         } catch {}
         tsNode.unRegister();
         if (resolved) {
-            return path.of(resolved, FileSystems.current);
+            return path.onFileSystem(FileSystems.current)(resolved);
         }
     }
     throw new Error(`config file "${requirePath}" cannot be found and/or loaded`);
@@ -56,12 +56,14 @@ export const Config = {
         const fd = await resolvedPath.call(path.open(O_RDONLY));
         const code = (await fd.readFile()).toString();
         await fd.close();
-        const mmakeExport = "export const mmake: UserConfig = ";
-        if (!code.includes(mmakeExport)) {
-            throw new Error(`config file \`${requirePath}\` must contain \`${mmakeExport}\``);
+        const mmakeExports = ["UserConfig", "Promise<UserConfig>"].map(type => `export const mmake: ${type} = `);
+        if (!mmakeExports.some(s => code.includes(s))) {
+            throw new Error(`config file \`${requirePath}\` must contain ${
+                mmakeExports.map(s => `\`${s}\``).join(" or ")
+                }`);
         }
-        const {mmake} = require(resolvedPath.raw) as {mmake: UserConfig};
-        return mmake;
+        const {mmake} = require(resolvedPath.raw) as {mmake: UserConfig | Promise<UserConfig>};
+        return await mmake;
     },
     
     async load(requirePath: Path): Promise<Config> {

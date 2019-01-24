@@ -1,4 +1,5 @@
-import {O_CREAT, O_WRONLY} from "constants";
+import {O_CREAT, O_TRUNC, O_WRONLY} from "constants";
+import {findFiles} from "../lib/find";
 import {Path} from "../util/io/Path";
 import {path} from "../util/io/pathExtensions";
 import {Compiler, compilers} from "./Compiler";
@@ -15,7 +16,7 @@ import {SuppressErrors} from "./SuppressError";
 import {Tools} from "./Tools";
 import {Warnings} from "./Warning";
 
-export interface Target {
+export interface TargetRule {
     readonly name: string;
     readonly target: string;
     readonly compiler: Compiler;
@@ -27,10 +28,10 @@ export interface Target {
     readonly libraries: Libraries;
     readonly optimizations: ProductionModes<Optimizations>;
     readonly debug: ProductionModes<Debug>;
+    readonly flags: ProductionModes<Flags>;
     readonly directories: Directories;
+    readonly filter: (path: Path) => boolean;
 }
-
-export type Targets = ReadonlyArray<Target>;
 
 export interface UserTarget {
     readonly target: string;
@@ -43,54 +44,267 @@ export interface UserTarget {
     readonly libraries?: Libraries;
     readonly optimizations?: ProductionModes<Partial<Optimizations>>;
     readonly debug?: ProductionModes<Debug>;
+    readonly flags?: ProductionModes<Flags>;
+    readonly filter?: (path: Path) => boolean;
 }
 
 export type UserTargets = ReadonlyArray<UserTarget>;
 
-interface TargetClass {
+export interface Target {
     
-    readonly default: Target;
+    readonly rule: TargetRule;
     
-    merge(name: string, target: UserTarget, defaultTarget?: Target): Target;
-    
-    toMakeFile(target: Target, mode: ProductionMode): string;
-    
-    makeFileGenerator(target: Target, log?: (generated: Path) => void): () => Promise<void>;
+    mode(mode: ProductionMode): TargetMode;
     
 }
 
-export const Target: TargetClass = {
+export type Targets = ReadonlyArray<Target>;
+
+export interface TargetMode {
     
-    default: {
+    readonly rule: TargetRule;
+    
+    readonly mode: ProductionMode;
+    
+    toMakeFile(): Promise<string>;
+    
+    createMakeFile(log?: (generated: Path) => void): Promise<void>;
+    
+}
+
+namespace TargetMode {
+    
+    export function of(rule: TargetRule, mode: ProductionMode): TargetMode {
+        const target = rule;
+    
+        async function toMakeFile(): Promise<string> {
+            const {name, compiler, standards, tools, directories, filter} = target;
+            const {compilers, preprocessor} = compiler;
+        
+            const out = (() => {
+                const dir = directories[mode];
+                return {
+                    dir,
+                    lib: dir.resolve(`lib${name}.a`),
+                    test: dir.resolve(`${name}.test.out`),
+                    exe: dir.resolve(`${name}.out`),
+                };
+            })();
+        
+            const files = await (async () => {
+                const {src, [mode]: out, test} = directories;
+                const allFiles = await findFiles(src, []);
+            
+                function addExtension(extension: string): (path: Path) => Path {
+                    return ({raw}) => path.of(`${out}${raw.slice(src.raw.length)}.${extension}`);
+                }
+            
+                const [toObject, toDependency] = ["o", "d"].map(addExtension);
+                const isTest = path.startsWith(test);
+            
+                const sources = allFiles
+                    .map(path.of)
+                    .filter(e => {
+                        const {extension} = e;
+                        return extension && extension.slice(1) in compilers;
+                    })
+                    .filter(filter);
+            
+                const objects = sources.map(toObject);
+                const testSources = sources.filter(isTest);
+                const testObjects = testSources.map(toObject);
+            
+                const testObjectsSet = new Set(testObjects.map(e => e.raw));
+                const libObjects = objects.filter(e => !testObjectsSet.has(e.raw));
+                const dependencies = sources.map(toDependency);
+            
+                return {sources, objects, testSources, testObjects, libObjects, dependencies};
+            })();
+            type Files = typeof files;
+            type FileStrings = { [P in keyof Files]: string };
+            const fileStrings = files.mapFields(a => a.map(e => e.raw).join(" ")) as FileStrings;
+        
+            const flags = (() => {
+                const flags = (() => {
+                    const {warnings, suppressErrors, macros, libraries, debug, optimizations, flags} = target;
+                    return {
+                        warnings: Warnings.toString(warnings),
+                        suppressErrors: SuppressErrors.toString(suppressErrors),
+                        macros: Macros.toString(macros[mode]),
+                        include: LibraryIncludes.toString(libraries),
+                        loadLibraries: LibraryBinaries.toString(libraries),
+                        debug: Debug.toString(debug[mode]),
+                        lto: Flag.toString(optimizations[mode].lto),
+                        optimizations: Optimizations.toString(optimizations[mode]),
+                        compiler: Flags.toString(flags[mode]),
+                    };
+                })();
+                const join = (a: string[]): string => a.filter(Boolean).join(" ");
+                const {warnings, suppressErrors, macros, include, debug, lto, optimizations, compiler} = flags;
+                const common = join([debug, warnings, suppressErrors, optimizations, macros, include, compiler]);
+                return {
+                    ...flags,
+                    preprocessor: join([include, macros, Flags.toString(["MMD", "MP"])]),
+                    ...standards.mapFields<Languages, Languages>(version => `-std=${version} ${common}`),
+                    link: join([debug, lto]),
+                };
+            })();
+        
+            const objectRule = (language: Language): MakeRule => ({
+                target: `${out.dir.resolve(`%.${language}.o`)}`,
+                dependencies: `${directories.src.resolve(`%.${language}`)}`,
+                commands: [
+                    `${tools.mkdir} $(dir $@)`,
+                    `${preprocessor[language]} ${flags.preprocessor} $< -MF $(@:.o=.d) -MT $@ > /dev/null`,
+                    `${compilers[language]} ${flags[language]} -c $< -o $@`,
+                ],
+                phony: false,
+            });
+        
+            const executeRule = (target: string, executable: Path): MakeRule => ({
+                target,
+                dependencies: executable,
+                commands: [
+                    `./${executable}`,
+                ],
+                phony: true,
+            });
+        
+            const toolRule = (tool: keyof Tools): MakeRule => ({
+                target: tool,
+                dependencies: out.exe,
+                commands: [
+                    `${tools[tool]} ./${out.exe}`,
+                ],
+                phony: true,
+            });
+        
+            const ownLibrary: Library = {
+                include: ".",
+                binary: out.lib,
+            };
+        
+            const rules: MakeRule[] = [
+                {
+                    target: "all",
+                    dependencies: [out.lib, out.test, out.exe].join(" "),
+                    commands: [],
+                    phony: true,
+                },
+                objectRule("c"),
+                objectRule("cpp"),
+                {
+                    target: out.lib,
+                    dependencies: `${fileStrings.libObjects}`,
+                    commands: [
+                        `${compiler.ar} rc ${out.lib} $^`,
+                        `${compiler.ranlib} ${out.lib}`,
+                    ],
+                    phony: false,
+                },
+                {
+                    target: out.test,
+                    dependencies: `${out.lib} ${fileStrings.testObjects}`,
+                    commands: [
+                        `${compilers.cpp} ${flags.link} ${fileStrings.objects} -o $@ ${flags.loadLibraries} ${LibraryBinary.toString(ownLibrary)} ${flags.compiler}`,
+                    ],
+                    phony: false,
+                },
+                {
+                    target: out.exe,
+                    dependencies: `${fileStrings.objects}`,
+                    commands: [
+                        `${compilers.cpp} ${flags.link} ${fileStrings.objects} -o $@ ${flags.loadLibraries} ${flags.compiler}`,
+                    ],
+                    phony: false,
+                },
+                {
+                    target: "lib",
+                    dependencies: out.lib,
+                    commands: [],
+                    phony: true,
+                },
+                {
+                    target: "main",
+                    dependencies: out.exe,
+                    commands: [],
+                    phony: true,
+                },
+                executeRule("test", out.test),
+                executeRule("run", out.exe),
+                {
+                    target: "time",
+                    dependencies: out.exe,
+                    commands: [
+                        `time ./${out.exe}`,
+                    ],
+                    phony: true,
+                },
+                toolRule("valgrind"),
+                toolRule("callgrind"),
+                toolRule("massif"),
+                {
+                    target: "clean",
+                    dependencies: "",
+                    commands: [
+                        `${tools.rm} -r ${out.dir}`,
+                    ],
+                    phony: true,
+                },
+            ];
+            return [
+                ...rules.map(MakeRule.toString),
+                `-include ${fileStrings.dependencies}`,
+                "",
+            ].join("\n\n");
+        }
+    
+        async function createMakeFile(log: (generated: Path) => void = () => {}): Promise<void> {
+            const dir = target.directories[mode];
+            const file = dir.resolve("Makefile");
+            await dir.call(path.create.directory({recursive: true}));
+            const fd = await file.call(path.open(O_WRONLY | O_CREAT | O_TRUNC));
+            await fd.writeFile(await toMakeFile());
+            await fd.close();
+            log(file);
+        }
+    
+        return {
+            rule,
+            mode,
+            toMakeFile,
+            createMakeFile,
+        };
+    }
+    
+}
+
+export namespace Target {
+    
+    export const defaultRule: TargetRule = {
         name: "a",
         target: "native",
         compiler: compilers.gcc,
         standards: {
-            c: "11",
-            cpp: "17",
+            c: "c11",
+            cpp: "c++17",
         },
         tools: {
-            valgrind: "valgrind --leak-check=full --show-leak-kinds=all",
+            valgrind: "valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all",
             callgrind: "valgrind --tool=callgrind",
             massif: "valgrind --tool=massif",
-            
+        
             mkdir: "mkdir -p",
             rm: "rm",
             find: "find",
         },
         warnings: ["all", "error", "extra"],
         suppressErrors: [],
-        macros: (() => {
-            const macros = {
-                _POSIX_C_SOURCE: "201901L",
-                _XOPEN_SOURCE: "700",
-                _DEFAULT_SOURCE: "1",
-            };
-            return {
-                development: macros,
-                production: macros,
-            };
-        })(),
+        macros: ProductionModes.share({
+            _POSIX_C_SOURCE: "201901L",
+            _XOPEN_SOURCE: "700",
+            _DEFAULT_SOURCE: "1",
+        }),
         libraries: [
             {
                 include: ".",
@@ -116,6 +330,10 @@ export const Target: TargetClass = {
                 flags: [],
             },
         },
+        flags: {
+            development: [],
+            production: [],
+        },
         directories: {
             target: "native",
             src: "src",
@@ -125,16 +343,17 @@ export const Target: TargetClass = {
             development: "development",
             production: "production",
         }.mapFields(path.of),
-    },
+        filter: () => true,
+    };
     
-    merge(name: string, target: UserTarget, defaultTarget: Target = Target.default): Target {
-        const mergeFlags = (get: (target: Target | UserTarget) => Flags | undefined): Flags => {
+    function mergeRules(name: string, target: UserTarget, defaultTarget: TargetRule): TargetRule {
+        function mergeFlags(get: (target: TargetRule | UserTarget) => Flags | undefined): Flags {
             return [
                 ...new Set([...(get(defaultTarget) || []), ...(get(target) || [])])
             ];
-        };
-        
-        function mergeProductionModes<T>(get: (target: Target) => ProductionModes<T>): ProductionModes<T> {
+        }
+    
+        function mergeProductionModes<T>(get: (target: TargetRule) => ProductionModes<T>): ProductionModes<T> {
             const _get = get as (target: UserTarget) => ProductionModes<T> | undefined;
             const defaultField = get(defaultTarget);
             const field: ProductionModes<T> = _get(target) || ({} as ProductionModes<T>);
@@ -149,7 +368,7 @@ export const Target: TargetClass = {
                 },
             };
         }
-        
+    
         return {
             name,
             target: target.target,
@@ -171,191 +390,22 @@ export const Target: TargetClass = {
             ],
             optimizations: mergeProductionModes(o => o.optimizations),
             debug: mergeProductionModes(o => o.debug),
+            flags: {
+                development: mergeFlags(o => o.flags && o.flags.development),
+                production: mergeFlags(o => o.flags && o.flags.production),
+            },
             directories: Directories.fill(defaultTarget.directories, target.target),
+            filter: target.filter || defaultTarget.filter,
         };
-    },
+    }
     
-    toMakeFile(target: Target, mode: ProductionMode): string {
-        const {name, compiler, standards, tools, directories} = target;
-        const {compilers, preprocessor} = compiler;
-        
-        const out = (() => {
-            const dir = directories[mode];
-            return {
-                dir,
-                lib: dir.resolve(`lib${name}.a`),
-                test: dir.resolve(`${name}.test.out`),
-                exe: dir.resolve(`${name}.out`),
-            };
-        })();
-        
-        const vars = (() => {
-            const sources = "SRCS";
-            const objects = "OBJS";
-            const testSources = "TEST_SRCS";
-            const testObjects = "TEST_OBJS";
-            const libObjects = "LIB_OBJS";
-            const dependencies = "DEPS";
-            const {src, [mode]: out, test} = directories;
-            const matchSources = Object.keys(compilers)
-                .map(ext => `-name "*.${ext}"`).join(" -or ");
-            function sourcesToObjects(sources: string, objects: string) {
-                return `${objects} := $(${sources}:${src.resolve("%")}=${out.resolve("%.o")})`;
-            }
-            return {
-                names: {
-                    sources,
-                    objects,
-                    testObjects,
-                    libObjects,
-                    dependencies,
-                },
-                declarations: [
-                    `${sources} := $(shell ${tools.find} ${src} ${matchSources})`,
-                    sourcesToObjects(sources, objects),
-                    `${testSources} := $(filter ${test.resolve("%")},$(${sources}))`,
-                    sourcesToObjects(testSources, testObjects),
-                    `${libObjects} := $(filter-out $(${testObjects}),$(${objects}))`,
-                    `${dependencies} := $(${objects}:.o=.d)`,
-                ],
-            };
-        })();
-        
-        const flags = (() => {
-            const flags = (() => {
-                const {warnings, suppressErrors, macros, libraries, debug, optimizations} = target;
-                return {
-                    warnings: Warnings.toString(warnings),
-                    suppressErrors: SuppressErrors.toString(suppressErrors),
-                    macros: Macros.toString(macros[mode]),
-                    include: LibraryIncludes.toString(libraries),
-                    loadLibraries: LibraryBinaries.toString(libraries),
-                    debug: Debug.toString(debug[mode]),
-                    lto: Flag.toString(optimizations[mode].lto),
-                    optimizations: Optimizations.toString(optimizations[mode]),
-                };
-            })();
-            const join = (a: string[]): string => a.filter(Boolean).join(" ");
-            const {warnings, suppressErrors, macros, include, debug, lto, optimizations} = flags;
-            const common = join([debug, warnings, suppressErrors, optimizations, macros, include]);
-            const {c, cpp} = standards;
-            const std = (version: string) => `-std=${version} ${common}`;
-            return {
-                ...flags,
-                preprocessor: join([include, macros, Flags.toString(["MMD", "MP"])]),
-                c: std(`c${c}`),
-                cpp: std(`c++${cpp}`),
-                link: join([debug, lto]),
-            };
-        })();
-        
-        const objectRule = (language: Language): MakeRule => ({
-            target: `${out.dir.resolve(`%.${language}.o`)}`,
-            dependencies: `${directories.src.resolve(`%.${language}`)}`,
-            commands: [
-                `${tools.mkdir} $(dir $@)`,
-                `${preprocessor[language]} ${flags.preprocessor} $< -MF $(@:.o=.d) -MT $@ > /dev/null`,
-                `${compilers[language]} ${flags[language]} -c $< -o $@`,
-            ],
-            phony: false,
-        });
-        
-        const executeRule = (target: string, executable: Path): MakeRule => ({
-            target,
-            dependencies: executable,
-            commands: [
-                `./${executable}`,
-            ],
-            phony: true,
-        });
-        
-        const ownLibrary: Library = {
-            include: ".",
-            binary: out.lib,
+    export function merge(name: string, target: UserTarget,
+                          defaultTarget: TargetRule = defaultRule): Target {
+        const rule = mergeRules(name, target, defaultTarget);
+        return {
+            rule,
+            mode: mode => TargetMode.of(rule, mode)
         };
-        
-        const rules: MakeRule[] = [
-            {
-                target: "all",
-                dependencies: [out.lib, out.test, out.exe].join(" "),
-                commands: [],
-                phony: true,
-            },
-            objectRule("c"),
-            objectRule("cpp"),
-            {
-                target: out.lib,
-                dependencies: "$(LIB_OBJS)",
-                commands: [
-                    `${compiler.ar} rc ${out.lib} $^`,
-                    `${compiler.ranlib} ${out.lib}`,
-                ],
-                phony: false,
-            },
-            {
-                target: out.test,
-                dependencies: `${out.lib} $(TEST_OBJS)`,
-                commands: [
-                    `${compilers.cpp} ${flags.link} $(OBJS) -o $@ ${flags.loadLibraries} ${LibraryBinary.toString(
-                        ownLibrary)}`,
-                ],
-                phony: false,
-            },
-            {
-                target: out.exe,
-                dependencies: `$(OBJS)`,
-                commands: [
-                    `${compilers.cpp} ${flags.link} $(OBJS) -o $@ ${flags.loadLibraries}`,
-                ],
-                phony: false,
-            },
-            {
-                target: "lib",
-                dependencies: out.lib,
-                commands: [],
-                phony: true,
-            },
-            executeRule("test", out.test),
-            executeRule("run", out.exe),
-            {
-                target: "clean",
-                dependencies: "",
-                commands: [
-                    `${tools.rm} -r ${out.dir}`,
-                ],
-                phony: true,
-            },
-        ];
-        const a = [
-            vars.declarations.join("\n"),
-            ...rules.map(MakeRule.toString),
-            `-include $(${vars.names.dependencies})`,
-            "",
-        ];
-        return [
-            vars.declarations.join("\n"),
-            ...rules.map(MakeRule.toString),
-            `-include $(${vars.names.dependencies})`,
-            "",
-        ].join("\n\n");
-    },
+    }
     
-    makeFileGenerator(target: Target, log: (generated: Path) => void = () => {}): () => Promise<void> {
-        const {development, production} = target.directories;
-        return () => Object.entries({development, production})
-            .map(([mode, dir]) => ({mode, dir}))
-            .map(({mode, dir}) => ({
-                dir,
-                file: dir.resolve("Makefile"),
-                contents: Target.toMakeFile(target, mode),
-            }))
-            .asyncForEach(async ({dir, file, contents}) => {
-                await dir.call(path.create.directory({recursive: true}));
-                const fd = await file.call(path.open(O_WRONLY | O_CREAT));
-                await fd.writeFile(contents);
-                await fd.close();
-                log(file);
-            });
-    },
-    
-};
+}

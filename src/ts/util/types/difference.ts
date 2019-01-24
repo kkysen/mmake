@@ -1,9 +1,8 @@
-import {PropagateWellKnownSymbols} from "./WellKnownSymbols";
 
 /**
  * T \ U
  */
-export type Difference<T, U> = {[K in Exclude<keyof T, keyof U>]: T[K]} & PropagateWellKnownSymbols<T>;
+export type Difference<T, U> = {[K in Exclude<keyof T, keyof U>]: T[K]};
 
 /**
  * T \ U & Partial<U>

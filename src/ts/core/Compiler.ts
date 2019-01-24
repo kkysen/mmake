@@ -25,5 +25,12 @@ export namespace compilers {
     export const gcc = makeCompiler({c: "gcc", cpp: "g++"}, "gcc");
     export const clang = makeCompiler({c: "clang", cpp: "clang++"}, "llvm");
     export const emscripten = makeCompiler({c: "emcc", cpp: "emcc"}, "llvm");
-    
+
+    export namespace cpp {
+
+        export const gcc = makeCompiler({c: "g++", cpp: "g++"}, "gcc");
+        export const clang = makeCompiler({c: "clang++", cpp: "clang++"}, "llvm");
+
+    }
+
 }

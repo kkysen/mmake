@@ -1,89 +1,109 @@
 import * as child_process from "child_process";
-import * as readline from "readline";
+import {range} from "../util/collections/Range";
+import {Path} from "../util/io/Path";
 import {path} from "../util/io/pathExtensions";
+import {tab} from "../util/misc/utils";
+import {forEachLine} from "../util/stream/lines";
 import {Config} from "./Config";
 import {MMakeArgs} from "./MMakeArgs";
 import {ProductionMode, ProductionModes} from "./ProductionModes";
-import {Target, Targets} from "./Target";
+import {Target, TargetRule, Targets} from "./Target";
 
 export interface MMakeTarget {
     
-    make(): Promise<void>;
+    readonly targets: Targets;
     
-    run(modes: Set<ProductionMode>, args: ReadonlyArray<string>): Promise<void>;
+    modes(modes: Set<ProductionMode>): MMakeTargetMode;
     
 }
 
-const tab = "    ";
+export interface MMakeTargetMode {
+    
+    readonly targets: Targets;
+    
+    readonly modes: ReadonlyArray<ProductionMode>;
+    
+    make(): Promise<void>;
+    
+    run(args: ReadonlyArray<string>): Promise<void>;
+    
+}
 
-const MMakeTarget = {
+namespace MMakeTarget {
     
-    of(targets: Targets): MMakeTarget {
-        async function make(): Promise<void> {
-            console.log(`${tab}generating Makefiles...`);
-            await targets.map(target =>
-                Target.makeFileGenerator(target, generated => console.log(`${tab}${tab}${generated}`))
-            ).asyncMap(f => f());
-        }
-        
-        async function run(modeSet: Set<ProductionMode>, args: ReadonlyArray<string>): Promise<void> {
-            await make();
-            const modes = [...modeSet];
-            const spawners = targets
-                .map(e => e.directories)
-                .flatMap(directories => modes.map(mode => directories[mode]))
-                .map(dir => async () => {
-                    // The paths in the Makefiles are all relative to the cwd,
-                    // so they can't be run from those directories.
-                    // Instead, I'm copying them over to a local temp file
-                    // and then running make on that Makefile.
-                    const temp = await path.of("Makefile.").call(path.temp());
-                    const makeArgs = [
-                        `--makefile=${temp}`,
-                        `--include-dir=${dir}`,
-                        ...args,
-                    ];
-                    console.log(`${tab}\`make ${makeArgs.join(" ")}\``);
-                    await dir.resolve("Makefile").call(path.copy.to(temp));
-                    return {
-                        temp,
-                        child: child_process.spawn("make", makeArgs, {
-                            stdio: ["inherit", "pipe", "inherit"],
-                            windowsHide: true,
-                        }),
-                    };
-                })
-                .map(spawn => async () => {
-                    const {temp, child} = await spawn();
-                    const out = {
-                        stdout: console.log,
-                        stderr: console.error,
-                    };
-                    // can pipe stderr, too, but then I lose terminal coloring for some reason
-                    const streamNames: (keyof typeof out)[] = ["stdout"];
-                    streamNames.forEach(streamName => {
-                        const lines = readline.createInterface({
-                            input: child[streamName],
-                            terminal: true,
+    function log(generated: Path) {
+        console.log(`${tab}${tab}${generated}`);
+    }
+    
+    function addTabs(numTabs: number, out: (line: string) => void): (line: string) => void {
+        const tabs = range.of(numTabs).fill(tab).join("");
+        return line => out(`${tabs}${line}`);
+    }
+    
+    export function of(targets: Targets): MMakeTarget {
+        return {
+            targets,
+            modes(modeSet: Set<ProductionMode>): MMakeTargetMode {
+                const modes = [...modeSet];
+    
+                async function make(): Promise<void> {
+                    console.log(`${tab}generating Makefiles...`);
+                    await modes.flatMap(mode => targets.map(target => target.mode(mode)))
+                        .asyncMap(generator => generator.createMakeFile(log));
+                }
+    
+                async function run(args: ReadonlyArray<string>): Promise<void> {
+                    await make();
+                    const spawners = targets
+                        .map(e => e.rule.directories)
+                        .flatMap(directories => modes.map(mode => directories[mode]))
+                        .map(dir => async () => {
+                            // The paths in the Makefiles are all relative to the cwd,
+                            // so they can't be run from those directories.
+                            // Instead, I'm copying them over to a local temp file
+                            // and then running make on that Makefile.
+                            const temp = await path.of("Makefile.tmp.").call(path.temp());
+                            const makeArgs = [
+                                `--makefile=${temp}`,
+                                `--include-dir=${dir}`,
+                                ...args,
+                            ];
+                            console.log(`${tab}\`make ${makeArgs.join(" ")}\``);
+                            await dir.resolve("Makefile").call(path.copy.to(temp));
+                            return {
+                                temp,
+                                child: child_process.spawn("make", makeArgs, {
+                                    stdio: ["inherit", "pipe", "inherit"],
+                                    windowsHide: true,
+                                }),
+                            };
+                        })
+                        .map(spawn => async () => {
+                            const {temp, child} = await spawn();
+                            await forEachLine(child, {
+                                stdout: addTabs(2, console.log),
+                                // stderr: addTabs(2, console.error),
+                                // can pipe stderr, too, but then I lose terminal coloring for some reason
+                            });
+                            await temp.call(path.remove.file);
                         });
-                        lines.on("line", line => out[streamName](`${tab}${tab}${line}`));
-                    });
-                    await new Promise<void>((resolve, reject) => {
-                        child.on("exit", resolve);
-                        child.on("error", reject);
-                    });
-                    await temp.call(path.remove.file);
-                });
-            // run sequentially, parallelism is passed to make itself
-            for (const spawn of spawners) {
-                await spawn();
-            }
-        }
-        
-        return {make, run};
-    },
+                    // run sequentially, parallelism is passed to make itself
+                    for (const spawn of spawners) {
+                        await spawn();
+                    }
+                }
+                
+                return {
+                    targets,
+                    modes,
+                    make,
+                    run,
+                };
+            },
+        };
+    }
     
-};
+}
 
 export interface MMake {
     
@@ -93,36 +113,29 @@ export interface MMake {
     
     all(): MMakeTarget;
     
-    run(args: ReadonlyArray<string>): Promise<void>;
+    run(args: MMakeArgs): Promise<void>;
     
 }
 
-export const MMake = {
+export namespace MMake {
     
-    new(config: Config): MMake {
-        function getTarget(name: string): MMakeTarget {
-            const target = config.targets.find(target => target.target === name);
+    export function of(config: Config): MMake {
+        function getTarget(name: string): Targets {
+            const target = config.targets.find(target => target.rule.target === name);
             if (!target) {
                 throw new Error(`target "${name}" does not exist`);
             }
-            return MMakeTarget.of([target]);
+            return [target];
         }
-        
-        function getAllTargets(): MMakeTarget {
-            return MMakeTarget.of(config.targets);
-        }
-        
-        async function run(args: ReadonlyArray<string>): Promise<void> {
-            const [targetArg = "", ...makeArgs] = args;
-            const [_, targetName, run, modeArg] = /([^:]*)(:?)(.*)/.exec(targetArg)!!;
-            const target = targetName ? getTarget(targetName) : getAllTargets();
+    
+        const getAllTargets = () => config.targets;
+    
+        async function run({run, targetName, modePrefix, makeArgs}: MMakeArgs): Promise<void> {
+            const targets = targetName ? getTarget(targetName) : getAllTargets();
+            const modes = ProductionModes.startingWith(modePrefix).checked();
+            const target = MMakeTarget.of(targets).modes(modes);
             if (run) {
-                const all = ProductionModes.all;
-                const modes = !modeArg ? all : all.filter(mode => mode.startsWith(modeArg));
-                if (modes.length === 0) {
-                    throw new Error(`"${modeArg}" does not match any production modes: [${all.join(", ")}]`);
-                }
-                await target.run(new Set(modes), makeArgs);
+                await target.run(makeArgs);
             } else {
                 await target.make();
             }
@@ -130,16 +143,16 @@ export const MMake = {
         
         return {
             config,
-            target: getTarget,
-            all: getAllTargets,
+            target: getTarget.then_(MMakeTarget.of),
+            all: () => MMakeTarget.of(getAllTargets()),
             run,
         };
-    },
+    }
     
-    async run(args: MMakeArgs): Promise<void> {
+    export async function run(args: MMakeArgs): Promise<void> {
         const config = await Config.load(args.configRequirePath);
-        const mmake = MMake.new(config);
-        await mmake.run(args.args);
-    },
+        const mmake = of(config);
+        await mmake.run(args);
+    }
     
-};
+}

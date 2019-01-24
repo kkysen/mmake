@@ -27,12 +27,22 @@ export namespace path {
         return Path.is(path);
     }
     
-    export function of(path: string | Path, fileSystem: FileSystem = FileSystems.posix) {
+    function ofOnFileSystem(path: string | Path, fileSystem: FileSystem = FileSystems.posix) {
         if (is(path)) {
             return path.call(switchToFileSystem(fileSystem));
         }
         return Path.of(path, fileSystem);
     }
+    
+    export function of(path: string | Path) {
+        return ofOnFileSystem(path);
+    }
+    
+    export function onFileSystem(fileSystem: FileSystem): typeof of {
+        return path => ofOnFileSystem(path, fileSystem);
+    }
+    
+    export const empty = of("");
     
     export function switchToFileSystem(fileSystem: FileSystem): PathExtension<Path> {
         return path => {
@@ -42,7 +52,7 @@ export namespace path {
             if (path.isAbsolute) {
                 throw new Error(`Can't switch FileSystem of absolute path: "${path.raw}"`);
             }
-            return of(path.raw.replace(path.fileSystem.separator, fileSystem.separator), fileSystem);
+            return onFileSystem(fileSystem)(path.raw.replace(path.fileSystem.separator, fileSystem.separator));
         };
     }
     
@@ -62,7 +72,7 @@ export namespace path {
         return path => path.raw.startsWith(prefix.toString());
     }
     
-    export const cwd = of(process.cwd(), FileSystems.current);
+    export const cwd = onFileSystem(FileSystems.current)(process.cwd());
     export const toAbsolute: PathExtension<Path> = path => cwd.resolve(path);
     
     function fromStats<R>(statsFunc: (stats: Stats) => R): PathExtension<Promise<R>> {
@@ -197,7 +207,7 @@ export namespace path {
         const tempDirRaw = makeBufferEncodingOptionsFunc(fsp.mkdtemp);
         
         function tempDir(options?: {encoding?: BufferEncoding} | BufferEncoding): PathExtension<Promise<Path>> {
-            return async path => (path.directory || of("")).resolve(await path.call(tempDirRaw(options)));
+            return async path => (path.directory || empty).resolve(await path.call(tempDirRaw(options)));
         }
         
         tempDir.raw = tempDirRaw;
@@ -269,7 +279,7 @@ export namespace path {
     const toRealRawPath = makeBufferEncodingOptionsFunc(fsp.realpath);
     
     export function toReal(options?: {encoding?: BufferEncoding} | BufferEncoding): PathExtension<Promise<Path>> {
-        return async path => of(await path.call(toRealRawPath(options)), path.fileSystem);
+        return async path => onFileSystem(path.fileSystem)(await path.call(toRealRawPath(options)));
     }
     
     toReal.raw = toRealRawPath;
