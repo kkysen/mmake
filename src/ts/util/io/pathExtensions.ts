@@ -72,6 +72,12 @@ export namespace path {
         return path => path.raw.startsWith(prefix.toString());
     }
     
+    export const parts: PathExtension<string[]> = path => {
+        const {raw, root, fileSystem: {separator}} = path;
+        const start = root ? root.raw.length + 1 : 0;
+        return raw.slice(start).split(separator);
+    };
+    
     export const cwd = onFileSystem(FileSystems.current)(process.cwd());
     export const toAbsolute: PathExtension<Path> = path => cwd.resolve(path);
     

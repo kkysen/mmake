@@ -149,6 +149,22 @@ namespace TargetMode {
                     link: join([debug, lto]),
                 };
             })();
+            
+            function singleObjectRule(source: Path): MakeRule | undefined {
+                const {extension} = source;
+                if (!(extension && extension.slice(1) in compilers)) {
+                    return;
+                }
+                if (!filter(source)) {
+                    return;
+                }
+                return {
+                    target: ``,
+                    dependencies: ``,
+                    
+                    phony: false,
+                };
+            }
         
             const objectRule = (language: Language): MakeRule => ({
                 target: `${out.dir.resolve(`%.${language}.o`)}`,
