@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "fs-extra": "^7.0.1",
-    "ts-node": "^7.0.1",
+    "ts-node": "^10.9.2",
     "typescript": "^3.2.2"
   },
   "main": "src/ts/core/main.js",
